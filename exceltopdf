@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dynamic Data Table with Export</title>
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css"
+    />
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        padding: 20px;
+        background-color: #f4f4f9;
+      }
+      h1,
+      h3 {
+        color: #333;
+      }
+      button {
+        padding: 10px 20px;
+        background-color: #007bff;
+        color: white;
+        border: none;
+        cursor: pointer;
+        margin-right: 10px;
+        margin-top: 10px;
+      }
+      button:hover {
+        background-color: #0056b3;
+      }
+      .container {
+        margin-top: 20px;
+      }
+      .column-toggle {
+        margin: 20px 0;
+      }
+      .column-toggle label {
+        margin-right: 10px;
+      }
+      .data-table {
+        margin-top: 20px;
+        width: 100%;
+        border-collapse: collapse;
+      }
+      .data-table th,
+      .data-table td {
+        border: 1px solid #ddd;
+        padding: 8px;
+        text-align: left;
+      }
+      .data-table th {
+        background-color: #007bff;
+        color: white;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>Dynamic Data Table</h1>
+
+      <!-- File Upload -->
+      <input type="file" id="fileUpload" accept=".csv, .xlsx, .xls" />
+
+      <!-- Export Buttons -->
+      <div>
+        <button id="exportCSVButton">Export Sheet file</button>
+        <button id="exportPDFButton">Export to PDF</button>
+        <button id="exportPrintPDFButton">Export to print pdf</button>
+      </div>
+
+      <!-- Show/Hide Columns -->
+      <div class="column-toggle">
+        <h3>Show/Hide Columns</h3>
+        <div id="columnCheckboxes"></div>
+      </div>
+
+      <!-- Data Table -->
+      <table id="dataTable" class="data-table"></table>
+    </div>
+
+    <!-- Libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/papaparse/5.3.0/papaparse.min.js"></script>
+    <!-- PapaParse -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.17.4/xlsx.full.min.js"></script>
+
+    <!-- Include jsPDF -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+    <!-- Include jsPDF AutoTable plugin -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.21/jspdf.plugin.autotable.min.js"></script>
+
+    <script>
+      let columns = [];
+      let rows = [];
+      let columnVisibility = {};
+
+      // Handle file upload
+      document
+        .getElementById("fileUpload")
+        .addEventListener("change", handleFileUpload);
+
+      function handleFileUpload(event) {
+        const file = event.target.files[0];
+        if (file) {
+          const fileType = file.name.split(".").pop().toLowerCase();
+
+          if (fileType === "csv") {
+            // Parse CSV
+            Papa.parse(file, {
+              header: true,
+              skipEmptyLines: true,
+              complete: (result) => {
+                updateData(result.data);
+              },
+            });
+          } else if (fileType === "xlsx" || fileType === "xls") {
+            // Parse Excel
+            const reader = new FileReader();
+            reader.onload = (e) => {
+              const data = new Uint8Array(e.target.result);
+              const workbook = XLSX.read(data, { type: "array" });
+              const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+              const jsonData = XLSX.utils.sheet_to_json(worksheet);
+              updateData(jsonData);
+            };
+            reader.readAsArrayBuffer(file);
+          } else {
+            alert("Unsupported file type. Please upload a CSV or Excel file.");
+          }
+        }
+      }
+
+      // Update columns and rows after parsing the data
+      function updateData(data) {
+        const headers = Object.keys(data[0]);
+        columns = headers.map((header) => ({
+          field: header,
+          headerName: header,
+          width: 150,
+        }));
+
+        rows = data.map((row, index) => ({
+          id: index + 1,
+          ...row,
+        }));
+
+        // Initialize column visibility
+        columnVisibility = headers.reduce((acc, field) => {
+          if (
+            field === "created_time" ||
+            field === "full_name" ||
+            field === "phone_number" ||
+            field === "city"
+          ) {
+            acc[field] = true; // Set all columns visible by default
+          } else {
+            acc[field] = false;
+          }
+          return acc;
+        }, {});
+
+        renderTable();
+        renderColumnVisibility();
+      }
+
+      function convertSerializedTime(serializedTime) {
+        // Base date for Excel-style dates (adjust for days offset)
+        const baseDate = new Date("1899-12-30T00:00:00Z");
+
+        // Add the days represented by serializedTime
+        const convertedDate = new Date(
+          baseDate.getTime() + serializedTime * 24 * 60 * 60 * 1000
+        );
+
+        // Format the date and time in your desired format
+        return convertedDate.toLocaleString("en-IN", {
+          day: "2-digit",
+          month: "2-digit",
+          year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+          hour12: true,
+        });
+      }
+
+      // Render the data table
+      function renderTable() {
+        const table = document.getElementById("dataTable");
+        table.innerHTML = "";
+
+        const headerRow = document.createElement("tr");
+        columns.forEach((col) => {
+          if (columnVisibility[col.field]) {
+            const th = document.createElement("th");
+            th.textContent = col.headerName;
+            headerRow.appendChild(th);
+          }
+        });
+        table.appendChild(headerRow);
+
+        rows.forEach((row) => {
+          const tr = document.createElement("tr");
+
+          columns.forEach((col) => {
+            if (columnVisibility[col.field]) {
+              const td = document.createElement("td");
+              let cellValue = row[col.field];
+              // Check if the column is 'created_time'
+              if (col.field === "created_time" && cellValue) {
+                console.log(cellValue);
+                cellValue = convertSerializedTime(cellValue);
+              }
+
+              td.textContent = cellValue; // Set the formatted value to cell
+              tr.appendChild(td);
+            }
+          });
+
+          table.appendChild(tr);
+        });
+      }
+
+      // Render column visibility checkboxes
+      function renderColumnVisibility() {
+        const columnCheckboxesDiv = document.getElementById("columnCheckboxes");
+        columnCheckboxesDiv.innerHTML = "";
+
+        columns.forEach((col) => {
+          const checkboxLabel = document.createElement("label");
+          const checkbox = document.createElement("input");
+          checkbox.type = "checkbox";
+          checkbox.checked = columnVisibility[col.field];
+          checkbox.addEventListener("change", () => {
+            columnVisibility[col.field] = checkbox.checked;
+            renderTable();
+          });
+          checkboxLabel.appendChild(checkbox);
+          checkboxLabel.appendChild(document.createTextNode(col.headerName));
+          columnCheckboxesDiv.appendChild(checkboxLabel);
+        });
+      }
+
+      // Export to XLS
+      document
+        .getElementById("exportCSVButton")
+        .addEventListener("click", function () {
+          const visibleRows = rows.map((row) => {
+            const filteredRow = {};
+            columns.forEach((col) => {
+              if (columnVisibility[col.field]) {
+                // Apply `convertSerializedTime` for `created_time` column
+                filteredRow[col.headerName] =
+                  col.field === "created_time"
+                    ? convertSerializedTime(row[col.field])
+                    : row[col.field];
+              }
+            });
+            return filteredRow;
+          });
+
+          // Create a worksheet from the visible rows
+          const worksheet = XLSX.utils.json_to_sheet(visibleRows);
+
+          // Add a workbook and append the worksheet
+          const workbook = XLSX.utils.book_new();
+          XLSX.utils.book_append_sheet(workbook, worksheet, "Data");
+
+          // Export to .xls file
+          XLSX.writeFile(workbook, "data.xls");
+        });
+
+      // Export to PDF
+      document
+        .getElementById("exportPDFButton")
+        .addEventListener("click", function () {
+          const { jsPDF } = window.jspdf;
+          const doc = new jsPDF();
+          const tableColumn = columns
+            .filter((col) => columnVisibility[col.field])
+            .map((col) => col.headerName);
+          const tableRows = rows.map((row) => {
+            return columns
+              .filter((col) => columnVisibility[col.field])
+              .map((col) =>
+                col.field === "created_time"
+                  ? convertSerializedTime(row[col.field])
+                  : row[col.field]
+              );
+          });
+
+          // Ensure jsPDF AutoTable plugin is used correctly
+          doc.autoTable({
+            head: [tableColumn],
+            body: tableRows,
+            startY: 20,
+          });
+
+          doc.save("data.pdf");
+        });
+
+      document
+        .getElementById("exportPrintPDFButton")
+        .addEventListener("click", function () {
+          const table = document.getElementById("dataTable");
+
+          // Clone the table to avoid affecting the original one
+          const tableClone = table.cloneNode(true);
+
+          // Open a new window for the print preview
+          const printWindow = window.open("", "", "width=800,height=600");
+
+          // Write HTML and styles for the print preview
+          printWindow.document.write(`
+      <html>
+        <head>
+          <title>Print Table</title>
+          <style>
+            body {
+              font-family: Arial, sans-serif;
+              padding: 20px;
+            }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              margin: 20px 0;
+            }
+            table, th, td {
+              border: 1px solid black;
+            }
+            th, td {
+              padding: 8px;
+              text-align: left;
+            }
+            th {
+              background-color: #007bff;
+              color: white;
+            }
+          </style>
+        </head>
+        <body>
+          <h1>Table Export</h1>
+        </body>
+      </html>
+    `);
+
+          // Append the table to the print window's body
+          printWindow.document.body.appendChild(tableClone);
+
+          // Automatically open the print dialog
+          printWindow.document.close(); // Important to ensure the document is fully loaded
+          printWindow.print();
+
+          // Optionally, close the print window
+          printWindow.close();
+        });
+    </script>
+  </body>
+</html>
